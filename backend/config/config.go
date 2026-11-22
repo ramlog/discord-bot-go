@@ -22,8 +22,13 @@ type Config struct {
 	AudioTemp    string `json:"audio_temp"`
 	AudioTimeout int    `json:"audio_timeout"`
 	BotTimeout   string `json:"bot_timeout"`
-	AdminRole    string `json:"admin"`
 	BotChannel   string `json:"bot_channel"`
+	// OwnerIDs are Discord user IDs allowed to run global admin commands
+	// (/manage, /gulag). These commands affect every server the bot is on.
+	OwnerIDs []string `json:"owner_ids"`
+	// LegacyGuildID is the server that pre-multi-server statistics belong to.
+	// Only needed once, for the database migration of an existing install.
+	LegacyGuildID string `json:"legacy_guild_id"`
 }
 
 type ExtendedUser struct {
@@ -45,11 +50,6 @@ var (
 	configOnce     sync.Once
 )
 
-var (
-	guildInstance *discordgo.Guild
-	guildOnce     sync.Once
-)
-
 var AppPath = func() string {
 	if path := os.Getenv("APP_PATH"); path != "" { //use for local development
 		return path
@@ -66,15 +66,19 @@ func LoadConfig() *Config {
 		}
 
 		configInstance = &Config{
-			Token:        os.Getenv("TOKEN"), // Read the token from .env
-			DataDir:      filepath.Join(AppPath(), "data"),
-			SoundsDir:    filepath.Join(AppPath(), "data", "sounds"),
-			DB:           filepath.Join(AppPath(), "data", "soundbot.db"),
-			AudioTemp:    "temp",
-			AudioTimeout: 20,
-			BotTimeout:   timeout,
-			AdminRole:    os.Getenv("ADMIN_ROLE"),
-			BotChannel:   os.Getenv("BOT_CHANNEL"),
+			Token:         os.Getenv("TOKEN"), // Read the token from .env
+			DataDir:       filepath.Join(AppPath(), "data"),
+			SoundsDir:     filepath.Join(AppPath(), "data", "sounds"),
+			DB:            filepath.Join(AppPath(), "data", "soundbot.db"),
+			AudioTemp:     "temp",
+			AudioTimeout:  20,
+			BotTimeout:    timeout,
+			BotChannel:    os.Getenv("BOT_CHANNEL"),
+			OwnerIDs:      splitList(os.Getenv("OWNER_IDS")),
+			LegacyGuildID: strings.TrimSpace(os.Getenv("LEGACY_GUILD_ID")),
+		}
+		if len(configInstance.OwnerIDs) == 0 {
+			log.WarningLog.Println("environment variable OWNER_IDS not set, nobody can use /manage and /gulag")
 		}
 		// Check if Token is actually set
 		if configInstance.Token == "" {
@@ -106,7 +110,7 @@ func LoadConfig() *Config {
 	fmt.Printf("|%s|\n", strings.Repeat("-", 40))
 	fmt.Printf("| %-15s | %-20s |\n", "BOT_CHANNEL", configInstance.BotChannel)
 	fmt.Printf("|%s|\n", strings.Repeat("-", 40))
-	fmt.Printf("| %-15s | %-20s |\n", "ADMIN_ROLE", configInstance.AdminRole)
+	fmt.Printf("| %-15s | %-20d |\n", "OWNER_IDS", len(configInstance.OwnerIDs))
 	fmt.Printf("+%s+\n", strings.Repeat("-", 40))
 
 	return configInstance
@@ -120,14 +124,23 @@ func GetConfig() *Config {
 	return configInstance
 }
 
-func LoadGuild(guild *discordgo.Guild) *discordgo.Guild {
-	guildOnce.Do(func() {
-		guildInstance = guild
-	})
-
-	return guildInstance
+// IsOwner reports whether the given Discord user ID is a configured bot owner.
+func (c *Config) IsOwner(userID string) bool {
+	for _, id := range c.OwnerIDs {
+		if id == userID {
+			return true
+		}
+	}
+	return false
 }
 
-func GetGuild() *discordgo.Guild {
-	return guildInstance
+// splitList splits a comma separated env value into trimmed, non-empty parts.
+func splitList(v string) []string {
+	var out []string
+	for _, part := range strings.Split(v, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }

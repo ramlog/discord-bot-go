@@ -16,22 +16,12 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-var (
-	playMu      sync.Mutex    // serializes playback
-	stopMu      sync.Mutex    // guards currentStop
-	currentStop chan struct{} // closed to stop the active or pending sound
-)
-
 const opusSendTimeout = 2 * time.Second // max wait for the voice connection to accept a frame
 
-// stopCurrentSound signals the active sound to stop without blocking.
-func stopCurrentSound() {
-	stopMu.Lock()
-	defer stopMu.Unlock()
-	if currentStop != nil {
-		close(currentStop)
-		currentStop = nil
-	}
+// tempAudioName is the per-guild file name used by /audio, so two servers
+// downloading audio at the same time don't overwrite each other's file.
+func (a *API) tempAudioName(guildID string) string {
+	return a.model.Config.AudioTemp + "_" + guildID
 }
 
 var userLastInteraction = make(map[string]time.Time)
@@ -53,12 +43,6 @@ func (a *API) PromptInteractionPlaySound(s *discordgo.Session, i *discordgo.Inte
 		switch i.ApplicationCommandData().Name {
 		case "play":
 			_ = a.SendInteractionRespond("➡ Playing sound", s, i)
-			// Find the channel that the interaction came from
-			guild, err := s.State.Guild(model.Meta.Guild.ID)
-			if err != nil {
-				log.ErrorLog.Println("error finding guild:", err)
-				return
-			}
 
 			// Check if the user is in a voice channel
 			vs, err := a.VoiceChannelCheck(s, i)
@@ -83,6 +67,14 @@ func (a *API) PromptInteractionPlaySound(s *discordgo.Session, i *discordgo.Inte
 			}
 
 			soundName := i.ApplicationCommandData().Options[0].StringValue()
+
+			// add user and per-guild statistics (previously only buttons were counted)
+			if err := a.model.AddUser(interactionUser); err != nil {
+				log.ErrorLog.Println("error adding user:", err)
+			}
+			if err := a.model.AddUserStatistics(i.GuildID, interactionUser, soundName); err != nil {
+				log.ErrorLog.Println("error adding user statistics:", err)
+			}
 
 			content := []discordgo.MessageComponent{}
 			row := discordgo.ActionsRow{}
@@ -116,7 +108,7 @@ func (a *API) PromptInteractionPlaySound(s *discordgo.Session, i *discordgo.Inte
 			}
 
 			// Play the custom sound
-			err = a.PlaySound(s, i, guild.ID, vs.ChannelID, soundName)
+			err = a.PlaySound(s, i.GuildID, vs.ChannelID, soundName, false)
 			if err != nil {
 				log.ErrorLog.Println("error playing sound:", err)
 				err = a.UpdateInteractionResponse("➡ Sound not found", s, i)
@@ -139,26 +131,18 @@ func (a *API) PromptInteractionPlaySound(s *discordgo.Session, i *discordgo.Inte
 
 }
 
-// PlaySound plays the current buffer to the provided channel.
-func (a *API) PlaySound(s *discordgo.Session, i *discordgo.InteractionCreate, guildID, channelID, soundName string) error {
-	// Stop the current sound and register this one as the latest request.
-	stop := make(chan struct{})
-	stopMu.Lock()
-	if currentStop != nil {
-		close(currentStop)
-	}
-	currentStop = stop
-	stopMu.Unlock()
-	defer func() {
-		stopMu.Lock()
-		if currentStop == stop {
-			currentStop = nil
-		}
-		stopMu.Unlock()
-	}()
+// PlaySound plays a sound in the given voice channel of a guild.
+// isTemp=true plays the guild's last /audio download from disk instead of the DB.
+func (a *API) PlaySound(s *discordgo.Session, guildID, channelID, soundName string, isTemp bool) error {
+	g := model.Guild(guildID)
 
-	playMu.Lock()
-	defer playMu.Unlock()
+	// Stop the current sound of THIS guild and register this one as the latest request.
+	stop, done := g.StartPlayback()
+	defer done()
+
+	g.LockPlayer()
+	defer g.UnlockPlayer()
+	g.Touch()
 
 	// A newer request or the stop button superseded this one while waiting.
 	select {
@@ -170,7 +154,7 @@ func (a *API) PlaySound(s *discordgo.Session, i *discordgo.InteractionCreate, gu
 	// Load the sound file.
 	var err error
 	var buffer [][]byte
-	if soundName == a.model.Config.AudioTemp {
+	if isTemp {
 		buffer, err = a.model.LoadSoundFS(filepath.Join(a.model.Config.DataDir, soundName+".dca")) //play file from system if function (audio) is played
 	} else {
 		buffer, err = a.model.LoadSound(soundName)
@@ -216,15 +200,16 @@ func (a *API) PlaySound(s *discordgo.Session, i *discordgo.InteractionCreate, gu
 	// Sleep for a specified amount of time before ending.
 	time.Sleep(250 * time.Millisecond)
 
-	// Update the bot activity
-	model.UpdateBotActivity()
+	// Update the bot activity of this guild
+	g.Touch()
 	return nil
 }
 
-func (a *API) PlayAudio(audioName string, s *discordgo.Session, i *discordgo.InteractionCreate) error {
-	guild, err := s.State.Guild(model.Meta.Guild.ID)
-	if err != nil {
-		log.ErrorLog.Println("error finding guild:", err)
+// PlayAudio plays the guild's last downloaded /audio file.
+func (a *API) PlayAudio(s *discordgo.Session, i *discordgo.InteractionCreate) error {
+	audioName := a.tempAudioName(i.GuildID)
+	if _, err := os.Stat(filepath.Join(a.model.Config.DataDir, audioName+".dca")); err != nil {
+		_ = a.UpdateInteractionResponse("🎶  No audio has been played on this server yet", s, i)
 		return err
 	}
 
@@ -252,7 +237,7 @@ func (a *API) PlayAudio(audioName string, s *discordgo.Session, i *discordgo.Int
 	content = append(content, row)
 
 	msg := &discordgo.MessageSend{
-		Content:    "➡ Currently Playing by " + user.Mention() + ": " + audioName,
+		Content:    "➡ Currently Playing by " + user.Mention() + ": audio",
 		Components: content,
 	}
 
@@ -274,9 +259,9 @@ func (a *API) PlayAudio(audioName string, s *discordgo.Session, i *discordgo.Int
 		log.ErrorLog.Println("error deleting stop sound buttons:", err)
 	}
 
-	log.InfoLog.Printf("User: %s played sound", i.Member.User.GlobalName)
+	log.InfoLog.Printf("Guild %s: user %s played audio", i.GuildID, model.DisplayName(user))
 	// Play the sound
-	err = a.PlaySound(s, i, guild.ID, vs.ChannelID, audioName)
+	err = a.PlaySound(s, i.GuildID, vs.ChannelID, audioName, true)
 	if err != nil {
 		log.ErrorLog.Println("error playing sound:", err)
 		return err
@@ -398,8 +383,8 @@ func (a *API) cleanUpCategories(folderMap map[string][]string, existingCategorie
 func (a *API) VoiceChannelCheck(s *discordgo.Session, i *discordgo.InteractionCreate) (*discordgo.VoiceState, error) {
 	userInVS := false
 	var voiceState *discordgo.VoiceState
-	// Find the guild for that channel
-	guild, err := s.State.Guild(model.Meta.Guild.ID)
+	// Find the guild the interaction came from
+	guild, err := s.State.Guild(i.GuildID)
 	if err != nil {
 		log.ErrorLog.Println("error finding guild:", err)
 		return voiceState, err

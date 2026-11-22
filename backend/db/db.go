@@ -89,6 +89,11 @@ func InitDB() (*sql.DB, func() error, error) {
 		log.FatalLog.Fatal(err)
 	}
 
+	// Apply versioned migrations on top of the base schema
+	if err = runMigrations(db); err != nil {
+		log.FatalLog.Fatalf("Failed to migrate database: %v", err)
+	}
+
 	log.InfoLog.Println("Database schema initialized successfully")
 
 	return db, db.Close, nil

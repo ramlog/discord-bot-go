@@ -1,11 +1,13 @@
 package view
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -28,6 +30,10 @@ func (a *API) PromptInteractionManage(s *discordgo.Session, i *discordgo.Interac
 	if i.Type == discordgo.InteractionApplicationCommand {
 		switch i.ApplicationCommandData().Name {
 		case "manage":
+			// sounds are shared by all servers, so only bot owners may change them
+			if !a.requireOwner(s, i) {
+				return
+			}
 			//case create, delete, move:
 			if len(i.ApplicationCommandData().Options) == 0 {
 				err := a.handleList(s, i)
@@ -43,8 +49,16 @@ func (a *API) PromptInteractionManage(s *discordgo.Session, i *discordgo.Interac
 						log.ErrorLog.Println("error executing buttons command:", err)
 					}
 					url := option.Options[0].StringValue()
-					soundName := option.Options[1].StringValue()
-					category := option.Options[2].StringValue()
+					soundName := strings.TrimSpace(option.Options[1].StringValue())
+					category := strings.TrimSpace(option.Options[2].StringValue())
+					if err := validateName(soundName); err != nil {
+						_ = a.UpdateInteractionResponse("🎶  Invalid sound name: "+err.Error(), s, i)
+						return
+					}
+					if err := validateName(category); err != nil {
+						_ = a.UpdateInteractionResponse("🎶  Invalid category: "+err.Error(), s, i)
+						return
+					}
 					startTime := "0"
 					endTime := "0"
 					if len(option.Options) > 3 {
@@ -66,6 +80,7 @@ func (a *API) PromptInteractionManage(s *discordgo.Session, i *discordgo.Interac
 					err = a.DownloadAudio(download)
 					if err != nil {
 						log.ErrorLog.Println("error loading audio:", err)
+						_ = a.UpdateInteractionResponse("🎶  Could not download audio from this URL", s, i)
 						return
 					}
 					err = a.UpdateInteractionResponse("🎶  Audio is ready, creating button...", s, i)
@@ -77,6 +92,7 @@ func (a *API) PromptInteractionManage(s *discordgo.Session, i *discordgo.Interac
 					err = a.ConvertMP3ToDCA(soundName, download.Category)
 					if err != nil {
 						log.ErrorLog.Println("error converting audio:", err)
+						_ = a.UpdateInteractionResponse("🎶  Could not convert the audio", s, i)
 						return
 					}
 
@@ -205,7 +221,11 @@ func (a *API) PromptInteractionManage(s *discordgo.Session, i *discordgo.Interac
 					}
 				case "move":
 					soundName := option.Options[0].StringValue()
-					category := option.Options[1].StringValue()
+					category := strings.TrimSpace(option.Options[1].StringValue())
+					if err := validateName(category); err != nil {
+						_ = a.SendInteractionRespond("🎶  Invalid category: "+err.Error(), s, i)
+						return
+					}
 					response := fmt.Sprintf("👉  Moving sound %s to category %s", soundName, category)
 					err := a.SendInteractionRespond(response, s, i)
 					if err != nil {
@@ -252,8 +272,31 @@ func (a *API) PromptInteractionManage(s *discordgo.Session, i *discordgo.Interac
 	}
 }
 
-// DownloadAudio downloads the audio from the provided URL
+// validName allows letters (incl. umlauts), digits, space, dash and underscore.
+// It prevents path traversal ("../") and keeps button custom IDs short.
+var validName = regexp.MustCompile(`^[\p{L}\p{N} _\-]{1,40}$`)
+
+func validateName(name string) error {
+	if !validName.MatchString(name) {
+		return fmt.Errorf("use 1-40 letters, digits, spaces, '-' or '_'")
+	}
+	return nil
+}
+
+// isEmptyTimestamp treats "" and "0" as "not set".
+func isEmptyTimestamp(t string) bool {
+	t = strings.TrimSpace(t)
+	return t == "" || t == "0"
+}
+
+// DownloadAudio downloads the audio from the provided URL.
+// yt-dlp is started directly with an argument list (no shell), so user input
+// like "; rm -rf /" is passed as a literal string and never executed.
 func (a *API) DownloadAudio(download Download) error {
+	if !strings.HasPrefix(download.URL, "https://") && !strings.HasPrefix(download.URL, "http://") {
+		return fmt.Errorf("only http(s) URLs are allowed")
+	}
+
 	timeout := time.Duration(a.model.Config.AudioTimeout) * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -263,31 +306,34 @@ func (a *API) DownloadAudio(download Download) error {
 		destFile = filepath.Join(a.model.Config.DataDir, download.SoundName+".mp3")
 	}
 	log.InfoLog.Printf("Downloading %s to %s. START: %s, END: %s", download.URL, destFile, download.Start, download.End)
-	cmdStr := fmt.Sprintf("yt-dlp -x --audio-format mp3 --force-overwrites -o %s %s", destFile, download.URL)
-	if download.Start != "" && download.End != "" {
-		cmdStr = fmt.Sprintf("yt-dlp -x --audio-format mp3 --download-sections \"*%s-%s\" --force-overwrites -o %s %s", download.Start, download.End, destFile, download.URL)
+
+	args := []string{"-x", "--audio-format", "mp3", "--force-overwrites", "-o", destFile}
+	if !isEmptyTimestamp(download.Start) || !isEmptyTimestamp(download.End) {
+		start, end := "0", "inf"
+		if !isEmptyTimestamp(download.Start) {
+			start = strings.TrimSpace(download.Start)
+		}
+		if !isEmptyTimestamp(download.End) {
+			end = strings.TrimSpace(download.End)
+		}
+		args = append(args, "--download-sections", "*"+start+"-"+end)
 	}
+	// "--" ends option parsing, so a URL can never be interpreted as a yt-dlp flag
+	args = append(args, "--", download.URL)
 
-	cmd := exec.CommandContext(ctx, "bash", "-c", cmdStr)
-
-	// Start the command asynchronously and wait for completion
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to run yt-dlp: %w, output: %s", err, string(output))
-	}
-
-	// If the context has expired or was canceled before the command completed, handle that here
+	output, err := exec.CommandContext(ctx, "yt-dlp", args...).CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
 		log.ErrorLog.Println("Download Audio operation timed out")
 		return ctx.Err()
-	} else if ctx.Err() == context.Canceled {
-		log.ErrorLog.Println("Download Audio operation was canceled")
-		return ctx.Err()
 	}
-
+	if err != nil {
+		return fmt.Errorf("failed to run yt-dlp: %w, output: %s", err, string(output))
+	}
 	return nil
 }
 
+// ConvertMP3ToDCA converts an mp3 into the DCA (opus frame) format used for playback.
+// Equivalent to `ffmpeg ... | dca > file`, but wired up in Go without a shell.
 func (a *API) ConvertMP3ToDCA(fileName, categoryName string) error {
 	timeout := time.Duration(a.model.Config.AudioTimeout) * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -300,24 +346,50 @@ func (a *API) ConvertMP3ToDCA(fileName, categoryName string) error {
 		destFile = filepath.Join(a.model.Config.DataDir, fileName+".dca")
 	}
 
-	cmdStr := fmt.Sprintf("ffmpeg -i %s -filter:a \"loudnorm=I=-14:LRA=7:TP=-2, compand=attacks=0:points=-80/-80|-10/-5|0/-1\" -f s16le -ar 48000 -ac 2 pipe:1 | dca > %s", sourceFile, destFile)
-
-	cmd := exec.CommandContext(ctx, "bash", "-c", cmdStr)
-
-	// Run the command and capture the output
-	output, err := cmd.CombinedOutput()
+	out, err := os.Create(destFile)
 	if err != nil {
-		return fmt.Errorf("failed to run ffmpeg/dca: %w, output: %s", err, string(output))
+		return err
 	}
+	defer out.Close()
 
-	// Check if the context was canceled or timed out
+	ffmpeg := exec.CommandContext(ctx, "ffmpeg", "-nostdin", "-loglevel", "error",
+		"-i", sourceFile,
+		"-filter:a", "loudnorm=I=-14:LRA=7:TP=-2, compand=attacks=0:points=-80/-80|-10/-5|0/-1",
+		"-f", "s16le", "-ar", "48000", "-ac", "2", "pipe:1")
+	dca := exec.CommandContext(ctx, "dca")
+
+	var ffErr, dcaErr bytes.Buffer
+	ffmpeg.Stderr = &ffErr
+	dca.Stderr = &dcaErr
+	dca.Stdout = out
+
+	// the pipe: ffmpeg stdout -> dca stdin
+	pipe, err := ffmpeg.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	dca.Stdin = pipe
+
+	if err := ffmpeg.Start(); err != nil {
+		return fmt.Errorf("failed to start ffmpeg: %w", err)
+	}
+	if err := dca.Start(); err != nil {
+		_ = ffmpeg.Process.Kill()
+		_ = ffmpeg.Wait()
+		return fmt.Errorf("failed to start dca: %w", err)
+	}
+	dcaWaitErr := dca.Wait()
+	ffWaitErr := ffmpeg.Wait()
+
 	if ctx.Err() == context.DeadlineExceeded {
 		log.ErrorLog.Println("Converting Audio operation timed out")
 		return ctx.Err()
-	} else if ctx.Err() == context.Canceled {
-		log.ErrorLog.Println("Converting Audio operation was canceled")
-		return ctx.Err()
 	}
-
+	if ffWaitErr != nil {
+		return fmt.Errorf("ffmpeg failed: %w, output: %s", ffWaitErr, ffErr.String())
+	}
+	if dcaWaitErr != nil {
+		return fmt.Errorf("dca failed: %w, output: %s", dcaWaitErr, dcaErr.String())
+	}
 	return nil
 }

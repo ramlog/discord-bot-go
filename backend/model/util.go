@@ -211,68 +211,49 @@ func FileExistsInFS(fsFiles []string, fileName string) bool {
 	return false
 }
 
-func (m *Model) LeaveVoiceChannel(s *discordgo.Session) {
-	// Get the voice connection for the guild
-	vc := s.VoiceConnections[Meta.Guild.ID]
+// LeaveVoiceChannel disconnects the bot from voice in the given guild, if connected.
+func (m *Model) LeaveVoiceChannel(s *discordgo.Session, guildID string) {
+	s.RLock()
+	vc := s.VoiceConnections[guildID]
+	s.RUnlock()
 	if vc == nil {
-		// Bot is not in a voice channel
+		// Bot is not in a voice channel on this guild
 		return
 	}
 
-	// Check if the bot is currently connected to a voice channel in the guild
-	guild, err := s.State.Guild(Meta.Guild.ID)
-	if err != nil {
-		log.ErrorLog.Println("error finding guild:", err)
+	Guild(guildID).StopPlayback()
+	if err := vc.Disconnect(); err != nil {
+		log.ErrorLog.Printf("error disconnecting from voice channel in guild %s: %v", guildID, err)
 		return
 	}
-
-	botInVC := false
-	for _, vs := range guild.VoiceStates {
-		if vs.UserID == s.State.User.ID {
-			botInVC = true
-			break
-		}
-	}
-
-	// If the bot is in a voice channel, attempt to disconnect
-	if botInVC {
-		err := vc.Disconnect()
-		if err != nil {
-			log.ErrorLog.Println("error disconnecting from voice channel:", err)
-			return
-		}
-		log.InfoLog.Println("Bot successfully left the voice channel after inactivity.")
-	}
+	log.InfoLog.Printf("Bot left the voice channel in guild %s after inactivity.", guildID)
 }
 
-// getChannelByName returns a channel by its name
-func getChannelByName(s *discordgo.Session, channelName string) (*discordgo.Channel, error) {
-	guild, err := s.State.Guild(Meta.Guild.ID)
-	if err != nil {
-		log.FatalLog.Fatalf("Failed to get guild: %v", err)
-	}
-
-	channels, err := s.GuildChannels(guild.ID)
+// getChannelByName returns a text channel of a guild by its name
+func getChannelByName(s *discordgo.Session, guildID, channelName string) (*discordgo.Channel, error) {
+	channels, err := s.GuildChannels(guildID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Loop through channels to find one that matches the name
 	for _, channel := range channels {
 		if channel.Name == channelName {
 			return channel, nil
 		}
 	}
 
-	// Return an error if no channel was found with the specified name
 	return nil, fmt.Errorf("channel with name %s not found", channelName)
 }
 
-// PinNewSoundButtons pins the new sound buttons to the bot channel
-func (m *Model) PinNewSoundButtons(s *discordgo.Session) {
-	channel, err := getChannelByName(s, m.Config.BotChannel)
+// PinNewSoundButtons pins the new sound buttons to the bot channel of a guild.
+// Guilds without a channel named BOT_CHANNEL are skipped.
+func (m *Model) PinNewSoundButtons(s *discordgo.Session, guildID string) {
+	if m.Config.BotChannel == "" {
+		return
+	}
+	channel, err := getChannelByName(s, guildID, m.Config.BotChannel)
 	if err != nil {
-		log.ErrorLog.Printf("Failed to get channel by name: %v", err)
+		// not every server needs a bot channel, so this is not an error
 		return
 	}
 

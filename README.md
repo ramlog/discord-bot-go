@@ -43,6 +43,7 @@ A feature-rich [Discord](https://discord.com/) soundboard bot written in [Go](ht
 - **Gulag** — Temporarily restrict a user from using sounds for a specified duration
 - **Spam protection** — Automatic rate limiting (max 15 interactions per 15 seconds)
 - **Auto-leave** — Bot leaves voice channel after configurable inactivity timeout
+- **Multi-server** — Add the bot to as many Discord servers as you like: all servers share the same sounds and favorites, statistics are kept per server
 
 ## Commands
 
@@ -91,7 +92,7 @@ Manage your personal favorite sounds.
 
 ### `/manage`
 
-Add, delete, or move sounds. Requires the configured admin role.
+Add, delete, or move sounds. Sounds are shared by all servers, so this command is restricted to the bot owners (`OWNER_IDS`).
 
 | Subcommand | Description |
 |------------|-------------|
@@ -109,7 +110,7 @@ Add, delete, or move sounds. Requires the configured admin role.
 
 ### `/stats`
 
-View usage statistics.
+View usage statistics of the current server.
 
 | Subcommand | Description |
 |------------|-------------|
@@ -119,7 +120,7 @@ View usage statistics.
 
 ### `/gulag`
 
-Restrict users from using the soundboard. Requires the configured admin role.
+Restrict users from using the soundboard on all servers. Restricted to the bot owners (`OWNER_IDS`).
 
 | Subcommand | Description |
 |------------|-------------|
@@ -129,7 +130,7 @@ Restrict users from using the soundboard. Requires the configured admin role.
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `user` | Yes (for `add`/`remove`) | The target user |
+| `user` | Yes (for `add`/`remove`) | The target user (Discord user picker) |
 | `timeout` | Yes (for `add`) | Duration in minutes |
 
 ### `/misc`
@@ -185,9 +186,12 @@ cp .env.example .env
 |----------|-------------|---------|
 | `TOKEN` | Discord bot token | *(required)* |
 | `APP_PATH` | Path to the data directory | `./` |
-| `ADMIN_ROLE` | Role name with elevated bot permissions | *(required)* |
-| `BOT_TIMEOUT` | Minutes of inactivity before leaving voice | `10` |
-| `BOT_CHANNEL` | Channel where the bot pins messages | *(required)* |
+| `OWNER_IDS` | Comma separated Discord user IDs that may use `/manage` and `/gulag` | *(required for admin commands)* |
+| `BOT_TIMEOUT` | Minutes of inactivity before leaving voice | `120` |
+| `BOT_CHANNEL` | Channel name where the bot pins the newest sounds (servers without it are skipped) | *(optional)* |
+| `LEGACY_GUILD_ID` | Only for upgrading an existing install: server ID that the old statistics belong to | *(empty)* |
+
+> Get user and server IDs by enabling *Developer Mode* in Discord (Settings → Advanced) and right-clicking a user or server → *Copy ID*.
 
 ### 2. Add sound files
 
@@ -215,6 +219,26 @@ docker logs luren-bot
 ```
 
 > **Note:** The `./data` directory also contains the `soundbot.db` SQLite database. Back up this directory regularly.
+
+## Multiple servers
+
+Invite the bot to any number of servers with the same invite link (Discord Developer Portal → OAuth2 → URL Generator, scopes `bot` and `applications.commands`; permissions: View Channels, Send Messages, Read Message History, Manage Messages, Pin Messages, Connect, Speak).
+
+| Data | Scope |
+|------|-------|
+| Sounds & categories | Shared by all servers |
+| Favorites | Per user, shared by all servers |
+| Gulag | Per user, applies on all servers |
+| Statistics (`/stats`) | Per server |
+| Playback, stop button, auto-leave | Per server |
+
+Slash commands are registered on every server automatically when the bot starts or joins a new server.
+
+### Upgrading from the single-server version
+
+The database is migrated automatically on first start. Existing statistics have no server assigned, so set `LEGACY_GUILD_ID` to the ID of the server the bot was running on before. If old statistics exist and the variable is missing, the bot refuses to start and leaves the database untouched. Back up `data/soundbot.db` before upgrading.
+
+The variable `ADMIN_ROLE` is no longer used. The bot also no longer needs the privileged *Server Members* and *Presence* intents.
 
 ## Updating
 

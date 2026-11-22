@@ -1,13 +1,50 @@
 package view
 
 import (
+	"fmt"
+
 	"github.com/bwmarrin/discordgo"
-	log "github.com/cyb3rplis/discord-bot-go/logger"
-	"github.com/cyb3rplis/discord-bot-go/model"
 )
 
+// adminOnly hides a command from regular members by default. Server admins can
+// change that under Server Settings > Integrations. The real security check is
+// the OWNER_IDS check at execution time (see requireOwner).
+var adminOnly = func() *int64 { p := int64(discordgo.PermissionAdministrator); return &p }()
+
+// guildOnly makes commands unavailable in DMs.
+var guildOnly = &[]discordgo.InteractionContextType{discordgo.InteractionContextGuild}
+
+// AllCommands returns every slash command of the bot.
+func AllCommands() []*discordgo.ApplicationCommand {
+	cmds := []*discordgo.ApplicationCommand{
+		commandAudio(),
+		commandButtons(),
+		commandManage(),
+		commandFavorite(),
+		commandGulag(),
+		commandStats(),
+		commandPlaySound(),
+		commandMisc(),
+	}
+	for _, c := range cmds {
+		c.Contexts = guildOnly
+	}
+	return cmds
+}
+
+// RegisterCommands writes all slash commands to one guild. BulkOverwrite is
+// idempotent: it creates new commands, updates changed ones and deletes
+// commands that no longer exist, so it is safe to call on every GuildCreate.
+func RegisterCommands(s *discordgo.Session, guildID string) error {
+	_, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, guildID, AllCommands())
+	if err != nil {
+		return fmt.Errorf("registering commands in guild %s: %w", guildID, err)
+	}
+	return nil
+}
+
 // RegisterPromptInteractionsAudio - Register prompt interactions
-func RegisterPromptInteractionsAudio(s *discordgo.Session) {
+func commandAudio() *discordgo.ApplicationCommand {
 	commandName := "audio"
 	// Register the command with subcommands for URL and last
 	commands := []*discordgo.ApplicationCommand{
@@ -36,51 +73,38 @@ func RegisterPromptInteractionsAudio(s *discordgo.Session) {
 			},
 		},
 	}
-
-	//deletePromptInteraction(s, commandName)
-
-	// Now register the new command
-	_, err := s.ApplicationCommandCreate(s.State.User.ID, model.Meta.Guild.ID, commands[0])
-	if err != nil {
-		log.FatalLog.Fatalf("failed to create '%s' command: %v", commandName, err)
-	}
+	return commands[0]
 }
 
 // RegisterPromptInteractionsButtons - Register prompt interactions
-func RegisterPromptInteractionsButtons(s *discordgo.Session) {
+func commandButtons() *discordgo.ApplicationCommand {
 	commandName := "buttons"
 	// Register the command globally
 	commands := []*discordgo.ApplicationCommand{
 		{
 			Name:        commandName,
-			Description: "Manage your favorite sounds",
+			Description: "Show the soundboard",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
 					Name:        "list",
-					Description: "List all sound buttons on this server",
+					Description: "List all sound category buttons",
 				},
 			},
 		},
 	}
-
-	//deletePromptInteraction(s, commandName)
-
-	// Now register the new command
-	_, err := s.ApplicationCommandCreate(s.State.User.ID, model.Meta.Guild.ID, commands[0])
-	if err != nil {
-		log.FatalLog.Fatalf("failed to create '%s' command: %v", commandName, err)
-	}
+	return commands[0]
 }
 
 // RegisterPromptInteractionsDelete - Register prompt interactions
-func RegisterPromptInteractionsManage(s *discordgo.Session) {
+func commandManage() *discordgo.ApplicationCommand {
 	commandName := "manage"
 	// Register the command globally
 	commands := []*discordgo.ApplicationCommand{
 		{
-			Name:        commandName,
-			Description: "Manage all sounds on the server",
+			Name:                     commandName,
+			Description:              "Manage sounds on ALL servers (bot owners only)",
+			DefaultMemberPermissions: adminOnly,
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
@@ -156,15 +180,11 @@ func RegisterPromptInteractionsManage(s *discordgo.Session) {
 			},
 		},
 	}
-	// Now register the new command
-	_, err := s.ApplicationCommandCreate(s.State.User.ID, model.Meta.Guild.ID, commands[0])
-	if err != nil {
-		log.FatalLog.Fatalf("failed to create '%s' command: %v", commandName, err)
-	}
+	return commands[0]
 }
 
 // RegisterPromptInteractionsFavorite - Register prompt interactions for favorite
-func RegisterPromptInteractionsFavorite(s *discordgo.Session) {
+func commandFavorite() *discordgo.ApplicationCommand {
 	commandName := "favorite"
 	// Register the command globally
 	commands := []*discordgo.ApplicationCommand{
@@ -208,37 +228,18 @@ func RegisterPromptInteractionsFavorite(s *discordgo.Session) {
 			},
 		},
 	}
-
-	// deletePromptInteraction(s, commandName)
-
-	// Now register the new command
-	_, err := s.ApplicationCommandCreate(s.State.User.ID, model.Meta.Guild.ID, commands[0])
-	if err != nil {
-		log.FatalLog.Fatalf("failed to create '%s' command: %v", commandName, err)
-	}
+	return commands[0]
 }
 
 // RegisterPromptInteractionsGulag - Register prompt interactions for gulag
-func RegisterPromptInteractionsGulag(s *discordgo.Session) {
+func commandGulag() *discordgo.ApplicationCommand {
 	commandName := "gulag"
-	/*users, err := a.model.GetUsers()
-	if err != nil {
-		log.FatalLog.Fatalf("cannot get sounds: %v", err)
-		return
-	}
-	var usersChoices []*discordgo.ApplicationCommandOptionChoice
-	for _, user := range users {
-		soundChoice := &discordgo.ApplicationCommandOptionChoice{
-			Name:  user.User.GlobalName,
-			Value: user.User.GlobalName,
-		}
-		usersChoices = append(usersChoices, soundChoice)
-	}*/
 	// Register the command globally
 	commands := []*discordgo.ApplicationCommand{
 		{
-			Name:        commandName,
-			Description: "Manage gulag",
+			Name:                     commandName,
+			Description:              "Block users from sounds on ALL servers (bot owners only)",
+			DefaultMemberPermissions: adminOnly,
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
@@ -251,13 +252,13 @@ func RegisterPromptInteractionsGulag(s *discordgo.Session) {
 					Description: "Add a user to the gulag",
 					Options: []*discordgo.ApplicationCommandOption{
 						{
-							Type:        discordgo.ApplicationCommandOptionString,
+							Type:        discordgo.ApplicationCommandOptionUser,
 							Name:        "user",
-							Description: "The name of the user to add to the gulag",
+							Description: "The user to add to the gulag",
 							Required:    true,
 						},
 						{
-							Type:        discordgo.ApplicationCommandOptionString,
+							Type:        discordgo.ApplicationCommandOptionInteger,
 							Name:        "timeout",
 							Description: "Time in minutes to keep the user in the gulag",
 							Required:    true,
@@ -270,9 +271,9 @@ func RegisterPromptInteractionsGulag(s *discordgo.Session) {
 					Description: "Remove a user from the gulag",
 					Options: []*discordgo.ApplicationCommandOption{
 						{
-							Type:        discordgo.ApplicationCommandOptionString,
+							Type:        discordgo.ApplicationCommandOptionUser,
 							Name:        "user",
-							Description: " The name of the user to remove from the gulag",
+							Description: "The user to remove from the gulag",
 							Required:    true,
 						},
 					},
@@ -280,18 +281,11 @@ func RegisterPromptInteractionsGulag(s *discordgo.Session) {
 			},
 		},
 	}
-
-	// deletePromptInteraction(s, commandName)
-
-	// Now register the new command
-	_, err := s.ApplicationCommandCreate(s.State.User.ID, model.Meta.Guild.ID, commands[0])
-	if err != nil {
-		log.FatalLog.Fatalf("failed to create '%s' command: %v", commandName, err)
-	}
+	return commands[0]
 }
 
 // RegisterPromptInteractionsStats - Register prompt interactions for stats
-func RegisterPromptInteractionsStats(s *discordgo.Session) {
+func commandStats() *discordgo.ApplicationCommand {
 	commandName := "stats"
 	// Register the command globally
 	commands := []*discordgo.ApplicationCommand{
@@ -317,17 +311,10 @@ func RegisterPromptInteractionsStats(s *discordgo.Session) {
 			},
 		},
 	}
-
-	// deletePromptInteraction(s, commandName)
-
-	// Now register the new command
-	_, err := s.ApplicationCommandCreate(s.State.User.ID, model.Meta.Guild.ID, commands[0])
-	if err != nil {
-		log.FatalLog.Fatalf("failed to create '%s' command: %v", commandName, err)
-	}
+	return commands[0]
 }
 
-func RegisterPromptInteractionsPlaySound(s *discordgo.Session) {
+func commandPlaySound() *discordgo.ApplicationCommand {
 	commandName := "play"
 	// Register the command globally
 	commands := []*discordgo.ApplicationCommand{
@@ -345,17 +332,10 @@ func RegisterPromptInteractionsPlaySound(s *discordgo.Session) {
 			},
 		},
 	}
-
-	// deletePromptInteraction(s, commandName)
-
-	// Now register the new command
-	_, err := s.ApplicationCommandCreate(s.State.User.ID, model.Meta.Guild.ID, commands[0])
-	if err != nil {
-		log.FatalLog.Fatalf("failed to create '%s' command: %v", commandName, err)
-	}
+	return commands[0]
 }
 
-func RegisterPromptInteractionsMisc(s *discordgo.Session) {
+func commandMisc() *discordgo.ApplicationCommand {
 	commandName := "misc"
 	commands := []*discordgo.ApplicationCommand{
 		{
@@ -370,37 +350,5 @@ func RegisterPromptInteractionsMisc(s *discordgo.Session) {
 			},
 		},
 	}
-
-	// deletePromptInteraction(s, commandName)
-
-	// Now register the new command
-	_, err := s.ApplicationCommandCreate(s.State.User.ID, model.Meta.Guild.ID, commands[0])
-	if err != nil {
-		log.FatalLog.Fatalf("failed to create '%s' command: %v", commandName, err)
-	}
-}
-
-func deletePromptInteraction(s *discordgo.Session, commandName string) {
-
-	// Fetch all the global commands
-	commandsList, err := s.ApplicationCommands(s.State.User.ID, model.Meta.Guild.ID)
-	if err != nil {
-		log.FatalLog.Fatalf("cannot fetch commands: %v", err)
-	}
-	// Check if the "audio" command already exists
-	var existingCmd *discordgo.ApplicationCommand
-	for _, cmd := range commandsList {
-		if cmd.Name == commandName {
-			existingCmd = cmd
-			break
-		}
-	}
-
-	// If the command exists, delete it before creating a new one
-	if existingCmd != nil {
-		err := s.ApplicationCommandDelete(s.State.User.ID, model.Meta.Guild.ID, existingCmd.ID)
-		if err != nil {
-			log.FatalLog.Printf("failed to delete existing command %s: %v", commandName, err)
-		}
-	}
+	return commands[0]
 }

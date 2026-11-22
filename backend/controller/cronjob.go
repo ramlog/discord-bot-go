@@ -43,38 +43,33 @@ func (c *Controller) SyncSoundDirectories() {
 	//s.StartBlocking()
 }
 
-func (c *Controller) SyncUsers(s *discordgo.Session, m *model.Model) {
-	interval := time.Minute * 15
-	scheduler := gocron.NewScheduler(time.UTC)
-	scheduler.Every(interval).Do(func() {
-		m.FetchAndStoreGuildMembers(s)
-	})
-	scheduler.StartAsync()
-}
-
+// CheckBotActivity leaves the voice channel on every server where no sound
+// was played for BOT_TIMEOUT minutes.
 func (c *Controller) CheckBotActivity(s *discordgo.Session, m *model.Model) {
 	botTimeout, err := strconv.Atoi(m.Config.BotTimeout)
 	if err != nil {
 		log.FatalLog.Fatalf("Failed to convert bot timeout to integer: %v", err)
 	}
+	timeout := time.Duration(botTimeout) * time.Minute
 
-	interval := time.Minute * 5
 	scheduler := gocron.NewScheduler(time.UTC)
-	scheduler.Every(interval).Do(func() {
-		thresholdTime := model.Meta.BotActivity.Add(time.Duration(botTimeout) * time.Minute)
-
-		if time.Now().After(thresholdTime) {
-			m.LeaveVoiceChannel(s)
+	_, _ = scheduler.Every(time.Minute).Do(func() {
+		for _, g := range model.Guilds() {
+			if !g.Playing() && time.Since(g.LastActivity()) > timeout {
+				m.LeaveVoiceChannel(s, g.ID)
+			}
 		}
 	})
 	scheduler.StartAsync()
 }
 
+// CheckNewSounds pins the newest sounds in the BOT_CHANNEL of every server.
 func (c *Controller) CheckNewSounds(s *discordgo.Session, m *model.Model) {
-	interval := time.Minute * 15
 	scheduler := gocron.NewScheduler(time.UTC)
-	scheduler.Every(interval).Do(func() {
-		m.PinNewSoundButtons(s)
+	_, _ = scheduler.Every(15 * time.Minute).Do(func() {
+		for _, g := range model.Guilds() {
+			m.PinNewSoundButtons(s, g.ID)
+		}
 	})
 	scheduler.StartAsync()
 }

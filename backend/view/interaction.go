@@ -62,7 +62,7 @@ func (a *API) InteractionHandler(s *discordgo.Session, i *discordgo.InteractionC
 		if err != nil {
 			log.ErrorLog.Println("error[int2] sending message:", err)
 		}
-		err := a.model.GulagUser(user, 1)
+		err := a.model.GulagUser(user.User, 1)
 		if err != nil {
 			log.ErrorLog.Println("error gulagging user:", err)
 		}
@@ -85,14 +85,13 @@ func (a *API) InteractionHandler(s *discordgo.Session, i *discordgo.InteractionC
 
 // handleStopSoundInteraction handles the stop sound interaction
 func (a *API) handleStopSoundInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	stopCurrentSound()
+	// only stops the sound on the server the button was clicked on
+	model.Guild(i.GuildID).StopPlayback()
 
 	// Delete the message that contains the stop button
-	st, err := s.ChannelMessage(i.ChannelID, i.ID)
-	if err == nil {
-		err = s.ChannelMessageDelete(st.ChannelID, st.ID)
-		if err != nil {
-			log.ErrorLog.Println("error deleting stop sound button after sound finished:", err)
+	if i.Message != nil {
+		if err := s.ChannelMessageDelete(i.ChannelID, i.Message.ID); err != nil {
+			log.ErrorLog.Println("error deleting stop sound button:", err)
 		}
 	}
 }
@@ -115,13 +114,6 @@ func (a *API) handlePlaySoundInteraction(s *discordgo.Session, i *discordgo.Inte
 	//subfolder := parts[0]
 	soundName := parts[1]
 
-	// Find the guild for that channel
-	guild, err := s.State.Guild(model.Meta.Guild.ID)
-	if err != nil {
-		log.ErrorLog.Println("error finding guild:", err)
-		return
-	}
-
 	interactionUser := i.Member.User
 
 	// Check if the user is in a voice channel
@@ -137,7 +129,7 @@ func (a *API) handlePlaySoundInteraction(s *discordgo.Session, i *discordgo.Inte
 		log.ErrorLog.Println("error adding user:", err)
 	}
 
-	err = a.model.AddUserStatistics(interactionUser, soundName)
+	err = a.model.AddUserStatistics(i.GuildID, interactionUser, soundName)
 	if err != nil {
 		log.ErrorLog.Println("error adding user statistics:", err)
 	}
@@ -168,12 +160,12 @@ func (a *API) handlePlaySoundInteraction(s *discordgo.Session, i *discordgo.Inte
 		log.ErrorLog.Println("error deleting all stop sound buttons:", err)
 	}
 
-	log.InfoLog.Printf("User: %s played sound: %s", interactionUser.GlobalName, soundName)
+	log.InfoLog.Printf("Guild %s: user %s played sound: %s", i.GuildID, model.DisplayName(interactionUser), soundName)
 	// Construct the sound file path
 	// soundFile := fmt.Sprintf("%s/%s/%s.dca", model.Bot.Config.SoundsDir, subfolder, soundName)
 
 	// Play the sound
-	err = a.PlaySound(s, i, guild.ID, vs.ChannelID, soundName)
+	err = a.PlaySound(s, i.GuildID, vs.ChannelID, soundName, false)
 	if err != nil {
 		log.ErrorLog.Println("error playing sound:", err)
 	}

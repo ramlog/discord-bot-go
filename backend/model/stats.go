@@ -4,8 +4,6 @@ import (
 	"database/sql"
 
 	"github.com/bwmarrin/discordgo"
-
-	log "github.com/cyb3rplis/discord-bot-go/logger"
 )
 
 type SoundInfo struct {
@@ -14,19 +12,20 @@ type SoundInfo struct {
 	Category string `json:"category_name"`
 }
 
-// GetAllUserStatistics returns the top sounds played by all users
-func (m *Model) GetAllUserStatistics() (soundStats map[string]int, err error) {
+// GetAllUserStatistics returns the most active users of a guild
+func (m *Model) GetAllUserStatistics(guildID string) (soundStats map[string]int, err error) {
 	rows, err := m.Db.Query(`
 	SELECT u.username, COALESCE(SUM(su.count), 0) AS total_plays
 	FROM stats_users AS su
 	LEFT JOIN users AS u ON su.user_id = u.id
+	WHERE su.guild_id = ?
 	GROUP BY u.id
 	HAVING total_plays > 0
 	ORDER BY total_plays
-	DESC LIMIT 10;`)
+	DESC LIMIT 10;`, guildID)
 
 	if err != nil {
-		log.FatalLog.Fatal(err)
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -37,7 +36,7 @@ func (m *Model) GetAllUserStatistics() (soundStats map[string]int, err error) {
 
 		err = rows.Scan(&sound, &count)
 		if err != nil {
-			log.FatalLog.Fatal(err)
+			return nil, err
 		}
 		if sound.Valid && count.Valid {
 			soundStats[sound.String] = int(count.Int64)
@@ -48,21 +47,21 @@ func (m *Model) GetAllUserStatistics() (soundStats map[string]int, err error) {
 	return soundStats, err
 }
 
-// GetUserStatistics returns the top sounds played by a user
-func (m *Model) GetUserStatistics(user *discordgo.User, limit int) (soundStats []SoundInfo, err error) {
+// GetUserStatistics returns the top sounds played by a user in a guild
+func (m *Model) GetUserStatistics(guildID string, user *discordgo.User, limit int) (soundStats []SoundInfo, err error) {
 	// this can be used to create buttons when the user gets their stats
 	rows, err := m.Db.Query(`
 	SELECT s.name, COALESCE(SUM(su.count), 0) AS total_plays, c.name
 	FROM sounds AS s
-	LEFT JOIN stats_users AS su ON s.id = su.sound_id AND su.user_id = ?
+	LEFT JOIN stats_users AS su ON s.id = su.sound_id AND su.user_id = ? AND su.guild_id = ?
 	JOIN categories AS c ON s.category_id = c.id
 	GROUP BY s.id, s.name
 	HAVING total_plays > 0
 	ORDER BY total_plays
-	DESC LIMIT ?;`, user.ID, limit)
+	DESC LIMIT ?;`, user.ID, guildID, limit)
 
 	if err != nil {
-		log.FatalLog.Fatal(err)
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -76,7 +75,7 @@ func (m *Model) GetUserStatistics(user *discordgo.User, limit int) (soundStats [
 
 		err = rows.Scan(&sound, &count, &category)
 		if err != nil {
-			log.FatalLog.Fatal(err)
+			return nil, err
 		}
 		if sound.Valid && count.Valid && category.Valid {
 			stat.Name = sound.String
@@ -90,11 +89,11 @@ func (m *Model) GetUserStatistics(user *discordgo.User, limit int) (soundStats [
 	return soundStats, err
 }
 
-// GetSoundStatistics returns the top sounds played
-func (m *Model) GetSoundStatistics() (soundStats map[string]int, err error) {
-	rows, err := m.Db.Query("SELECT s.name, COALESCE(SUM(su.count), 0) AS total_plays FROM sounds AS s LEFT JOIN stats_users AS su ON s.id = su.sound_id GROUP BY s.id, s.name HAVING total_plays > 0 ORDER BY total_plays DESC LIMIT 10;")
+// GetSoundStatistics returns the top sounds played in a guild
+func (m *Model) GetSoundStatistics(guildID string) (soundStats map[string]int, err error) {
+	rows, err := m.Db.Query("SELECT s.name, COALESCE(SUM(su.count), 0) AS total_plays FROM sounds AS s LEFT JOIN stats_users AS su ON s.id = su.sound_id AND su.guild_id = ? GROUP BY s.id, s.name HAVING total_plays > 0 ORDER BY total_plays DESC LIMIT 10;", guildID)
 	if err != nil {
-		log.FatalLog.Fatal(err)
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -105,7 +104,7 @@ func (m *Model) GetSoundStatistics() (soundStats map[string]int, err error) {
 
 		err = rows.Scan(&sound, &count)
 		if err != nil {
-			log.FatalLog.Fatal(err)
+			return nil, err
 		}
 		if sound.Valid && count.Valid {
 			soundStats[sound.String] = int(count.Int64)
@@ -116,14 +115,9 @@ func (m *Model) GetSoundStatistics() (soundStats map[string]int, err error) {
 	return soundStats, err
 }
 
-// AddUserStatistics adds a sound play to the user statistics
-func (m *Model) AddUserStatistics(user *discordgo.User, soundName string) error {
-	// userID, err := strconv.Atoi(user.ID)
-	// if err != nil {
-	// 	log.ErrorLog.Println("error converting user ID to int:", err)
-	// 	return err
-	// }
-	_, err := m.Db.Exec("INSERT INTO stats_users (user_id, sound_id, count) VALUES (?, (SELECT id FROM sounds WHERE name = ?), 1) ON CONFLICT(user_id, sound_id) DO UPDATE SET count = count + 1;", user.ID, soundName)
+// AddUserStatistics adds a sound play to the user statistics of a guild
+func (m *Model) AddUserStatistics(guildID string, user *discordgo.User, soundName string) error {
+	_, err := m.Db.Exec("INSERT INTO stats_users (guild_id, user_id, sound_id, count) VALUES (?, ?, (SELECT id FROM sounds WHERE name = ?), 1) ON CONFLICT(guild_id, user_id, sound_id) DO UPDATE SET count = count + 1;", guildID, user.ID, soundName)
 	if err != nil {
 		return err
 	}

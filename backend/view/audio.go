@@ -29,8 +29,7 @@ func (a *API) PromptInteractionAudio(s *discordgo.Session, i *discordgo.Interact
 					log.ErrorLog.Println("error executing audio command:", err)
 				}
 
-				download := Download{SoundName: a.model.Config.AudioTemp}
-				err = a.PlayAudio(download.SoundName, s, i)
+				err = a.PlayAudio(s, i)
 				if err != nil {
 					log.ErrorLog.Println("error playing audio:", err)
 				}
@@ -69,10 +68,11 @@ func (a *API) PromptInteractionAudio(s *discordgo.Session, i *discordgo.Interact
 					log.ErrorLog.Println("error[audio2] sending message:", err)
 				}
 				// Download and convert the audio
-				download := Download{URL: url, Start: "", End: "", Category: "", SoundName: a.model.Config.AudioTemp}
+				download := Download{URL: url, Start: "", End: "", Category: "", SoundName: a.tempAudioName(i.GuildID)}
 				err = a.DownloadAudio(download)
 				if err != nil {
 					log.ErrorLog.Println("error loading audio:", err)
+					_ = a.UpdateInteractionResponse("🎶  Could not load audio from this URL", s, i)
 					return
 				}
 				err = a.ConvertMP3ToDCA(download.SoundName, "")
@@ -87,7 +87,7 @@ func (a *API) PromptInteractionAudio(s *discordgo.Session, i *discordgo.Interact
 				}
 				time.Sleep(8 * time.Second)
 				// Play the custom audio
-				err = a.PlayAudio(download.SoundName, s, i)
+				err = a.PlayAudio(s, i)
 				if err != nil {
 					log.ErrorLog.Println("error playing audio:", err)
 				}
