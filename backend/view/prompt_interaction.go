@@ -50,7 +50,7 @@ func commandAudio() *discordgo.ApplicationCommand {
 	commands := []*discordgo.ApplicationCommand{
 		{
 			Name:        commandName,
-			Description: "Play audio from a URL or replay the last audio",
+			Description: "Play audio from a URL or replay the last audio (mods only)",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionSubCommand,

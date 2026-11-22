@@ -8,6 +8,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 
 	log "github.com/cyb3rplis/discord-bot-go/logger"
+	"github.com/cyb3rplis/discord-bot-go/model"
 )
 
 func (a *API) PromptInteractionAudio(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -16,6 +17,13 @@ func (a *API) PromptInteractionAudio(s *discordgo.Session, i *discordgo.Interact
 	if i.Type == discordgo.InteractionApplicationCommand {
 		switch i.ApplicationCommandData().Name {
 		case "audio":
+			// /audio downloads arbitrary URLs on the host, so it is limited to MOD_IDS (+ owners)
+			if !a.model.Config.IsMod(interactionUser.ID) {
+				log.WarningLog.Printf("Guild %s: user %s (%s) tried to use /audio without being a mod",
+					i.GuildID, model.DisplayName(interactionUser), interactionUser.ID)
+				_ = a.SendInteractionRespond("⛔  /audio is reserved for the bot moderators.", s, i)
+				return
+			}
 			option := i.ApplicationCommandData().Options[0]
 			switch option.Name {
 			case "last":

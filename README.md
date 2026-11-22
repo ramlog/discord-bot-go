@@ -57,7 +57,7 @@ Play a sound directly by name.
 
 ### `/audio`
 
-Play or replay audio from an external URL.
+Play or replay audio from an external URL. Restricted to the bot moderators (`MOD_IDS`) and owners (`OWNER_IDS`), because it downloads arbitrary URLs on the host.
 
 | Subcommand | Description |
 |------------|-------------|
@@ -188,6 +188,7 @@ cp .env.example .env
 | `TOKEN` | Discord bot token | *(required)* |
 | `APP_PATH` | Path to the data directory | `./` |
 | `OWNER_IDS` | Comma separated Discord user IDs that may use `/manage` and `/gulag` | *(required for admin commands)* |
+| `MOD_IDS` | Comma separated Discord user IDs that may use `/audio` (owners always may) | *(empty = owners only)* |
 | `BOT_TIMEOUT` | Minutes of inactivity before leaving voice | `120` |
 | `BOT_CHANNEL` | Channel name where the bot pins the newest sounds (servers without it are skipped) | *(optional)* |
 | `LEGACY_GUILD_ID` | Only for upgrading an existing install: server ID that the old statistics belong to | *(empty)* |

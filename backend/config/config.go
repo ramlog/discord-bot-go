@@ -26,6 +26,9 @@ type Config struct {
 	// OwnerIDs are Discord user IDs allowed to run global admin commands
 	// (/manage, /gulag). These commands affect every server the bot is on.
 	OwnerIDs []string `json:"owner_ids"`
+	// ModIDs are Discord user IDs allowed to use /audio (download + play any URL).
+	// Owners are always allowed as well.
+	ModIDs []string `json:"mod_ids"`
 	// LegacyGuildID is the server that pre-multi-server statistics belong to.
 	// Only needed once, for the database migration of an existing install.
 	LegacyGuildID string `json:"legacy_guild_id"`
@@ -75,6 +78,7 @@ func LoadConfig() *Config {
 			BotTimeout:    timeout,
 			BotChannel:    os.Getenv("BOT_CHANNEL"),
 			OwnerIDs:      splitList(os.Getenv("OWNER_IDS")),
+			ModIDs:        splitList(os.Getenv("MOD_IDS") + "," + os.Getenv("MOD_ID")),
 			LegacyGuildID: strings.TrimSpace(os.Getenv("LEGACY_GUILD_ID")),
 		}
 		if len(configInstance.OwnerIDs) == 0 {
@@ -111,6 +115,8 @@ func LoadConfig() *Config {
 	fmt.Printf("| %-15s | %-20s |\n", "BOT_CHANNEL", configInstance.BotChannel)
 	fmt.Printf("|%s|\n", strings.Repeat("-", 40))
 	fmt.Printf("| %-15s | %-20d |\n", "OWNER_IDS", len(configInstance.OwnerIDs))
+	fmt.Printf("|%s|\n", strings.Repeat("-", 40))
+	fmt.Printf("| %-15s | %-20d |\n", "MOD_IDS", len(configInstance.ModIDs))
 	fmt.Printf("+%s+\n", strings.Repeat("-", 40))
 
 	return configInstance
@@ -127,6 +133,20 @@ func GetConfig() *Config {
 // IsOwner reports whether the given Discord user ID is a configured bot owner.
 func (c *Config) IsOwner(userID string) bool {
 	for _, id := range c.OwnerIDs {
+		if id == userID {
+			return true
+		}
+	}
+	return false
+}
+
+// IsMod reports whether the given Discord user ID may use mod commands (/audio).
+// Owners are implicitly mods.
+func (c *Config) IsMod(userID string) bool {
+	if c.IsOwner(userID) {
+		return true
+	}
+	for _, id := range c.ModIDs {
 		if id == userID {
 			return true
 		}
