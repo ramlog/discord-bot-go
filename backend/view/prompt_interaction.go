@@ -24,6 +24,7 @@ func AllCommands() []*discordgo.ApplicationCommand {
 		commandGulag(),
 		commandStats(),
 		commandPlaySound(),
+		commandRandom(),
 		commandMisc(),
 	}
 	for _, c := range cmds {
@@ -356,4 +357,20 @@ func commandMisc() *discordgo.ApplicationCommand {
 		},
 	}
 	return commands[0]
+}
+
+func commandRandom() *discordgo.ApplicationCommand {
+	return &discordgo.ApplicationCommand{
+		Name:        "random",
+		Description: "Play a random sound",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:         discordgo.ApplicationCommandOptionString,
+				Name:         "category",
+				Description:  "Only pick from this category",
+				Required:     false,
+				Autocomplete: true,
+			},
+		},
+	}
 }

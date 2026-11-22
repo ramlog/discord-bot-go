@@ -56,6 +56,7 @@ func (a *API) handleList(s *discordgo.Session, i *discordgo.InteractionCreate) e
 	}
 	content := model.BuildListButtons(categories, discordgo.PrimaryButton)
 	messages := model.BuildMessages(content, nil)
+	messages = append(messages, &discordgo.MessageSend{Components: randomButtonComponents()})
 	for _, message := range messages {
 		_, err = a.SendMessageComplex(message, s, i, false)
 		if err != nil {

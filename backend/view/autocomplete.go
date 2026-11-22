@@ -23,14 +23,20 @@ func (a *API) AutocompleteHandler(s *discordgo.Session, i *discordgo.Interaction
 			break
 		}
 	}
+	focusedName := ""
 	for _, opt := range options {
 		if opt.Focused {
 			query = opt.StringValue()
+			focusedName = opt.Name
 			break
 		}
 	}
 
-	sounds, err := a.model.SearchSounds(query)
+	search := a.model.SearchSounds
+	if focusedName == "category" {
+		search = a.model.SearchCategories
+	}
+	sounds, err := search(query)
 	if err != nil {
 		log.ErrorLog.Printf("autocomplete search error: %v", err)
 		sounds = []string{}

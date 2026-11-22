@@ -55,6 +55,14 @@ Play a sound directly by name.
 |-----------|----------|-------------|
 | `sound` | Yes | The name of the sound to play |
 
+### `/random`
+
+Play a random sound.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `category` | No | Only pick from this category (autocomplete) |
+
 ### `/audio`
 
 Play or replay audio from an external URL. Restricted to the bot moderators (`MOD_IDS`) and owners (`OWNER_IDS`), because it downloads arbitrary URLs on the host.
@@ -150,7 +158,9 @@ The bot is designed around a button-driven interface. No commands are needed for
 |--------|-------------|
 | **Category** | Click a category to browse its sounds |
 | **Sound** | Click a sound to play it in your voice channel |
-| **Stop** | Stop the currently playing sound |
+| **🎲 Random Sound** | Play a random sound (shown below the category buttons) |
+| **Stop Sound** | Stop the current sound including all queued repeats |
+| **🔁 Repeat** | Play the current sound once more after it finishes (max. 3 times per sound) |
 
 <!-- TODO: Add screenshot of button interaction flow -->
 ![Button interaction flow](./assets/placeholder-button-flow.png)

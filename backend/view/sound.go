@@ -1,7 +1,6 @@
 package view
 
 import (
-	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,106 +28,60 @@ type Entry struct {
 	Name string
 }
 
+// PromptInteractionPlaySound handles /play and /random.
 func (a *API) PromptInteractionPlaySound(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	interactionUser := i.Member.User
-
-	if i.Type == discordgo.InteractionApplicationCommand {
-		switch i.ApplicationCommandData().Name {
-		case "play":
-			_ = a.SendInteractionRespond("➡ Playing sound", s, i)
-
-			// Check if the user is in a voice channel
-			vs, err := a.VoiceChannelCheck(s, i)
-			if err != nil {
-				log.ErrorLog.Println("error checking voice channel:", err)
-				return
-			}
-
-			// Check if the user is in the Gulag
-			user, err := a.model.SetUserGulaggedValue(interactionUser)
-			if err != nil && err != sql.ErrNoRows {
-				log.ErrorLog.Println("error getting user from username:", err)
-			} else {
-				if user, ok := SetUserGulagRemaining(user); ok {
-					message := fmt.Sprintf(user.User.Mention()+" you are in the Gulag for another %s", user.Remaining)
-					_, err = a.SendMessage(message, s, i, true)
-					if err != nil {
-						log.ErrorLog.Printf("error[sound1] sending message: %v", err)
-					}
-					return
-				}
-			}
-
-			soundName := i.ApplicationCommandData().Options[0].StringValue()
-
-			// /play accepts free text (autocomplete is only a suggestion), so make
-			// sure the sound exists before its name is posted in the channel
-			if sound, err := a.model.GetSound(soundName); err != nil || sound.Name == "" {
-				_ = a.UpdateInteractionResponse("🎶  Sound not found: "+escapeMarkdown(soundName), s, i)
-				return
-			}
-
-			// add user and per-guild statistics (previously only buttons were counted)
-			if err := a.model.AddUser(interactionUser); err != nil {
-				log.ErrorLog.Println("error adding user:", err)
-			}
-			if err := a.model.AddUserStatistics(i.GuildID, interactionUser, soundName); err != nil {
-				log.ErrorLog.Println("error adding user statistics:", err)
-			}
-
-			content := []discordgo.MessageComponent{}
-			row := discordgo.ActionsRow{}
-			row.Components = append(row.Components, discordgo.Button{
-				Label:    "Stop Sound",
-				Style:    discordgo.DangerButton,
-				CustomID: "stop_sound",
-			})
-			content = append(content, row)
-
-			msg := &discordgo.MessageSend{
-				Content:    "➡ Currently Playing by " + user.User.Mention() + ": " + soundName,
-				Components: content,
-			}
-
-			// Send the message (+stop button)
-			st, err := a.SendMessageComplex(msg, s, i, false)
-			if err != nil {
-				log.ErrorLog.Println("error[sound2] sending message:", err)
-				return
-			}
-
-			err = a.DeleteOldStopSoundButtons(s, st)
-			if err != nil {
-				log.ErrorLog.Println("error deleting stop sound buttons:", err)
-			}
-
-			err = a.UpdateInteractionResponse("➡ Playing sound", s, i)
-			if err != nil {
-				log.ErrorLog.Printf("error executing play command: %v", err)
-			}
-
-			// Play the custom sound
-			err = a.PlaySound(s, i.GuildID, vs.ChannelID, soundName, false)
-			if err != nil {
-				log.ErrorLog.Println("error playing sound:", err)
-				err = a.UpdateInteractionResponse("➡ Sound not found", s, i)
-				if err != nil {
-					log.ErrorLog.Printf("error executing play command: %v", err)
-				}
-			}
-
-			time.Sleep(250 * time.Millisecond)
-			st, err = s.ChannelMessage(st.ChannelID, st.ID)
-			if err == nil {
-				err = s.ChannelMessageDelete(st.ChannelID, st.ID)
-				if err != nil {
-					log.ErrorLog.Println("error deleting stop sound button after sound finished:", err)
-				}
-			}
-		}
-
+	if i.Type != discordgo.InteractionApplicationCommand {
+		return
+	}
+	data := i.ApplicationCommandData()
+	if data.Name != "play" && data.Name != "random" {
+		return
 	}
 
+	_ = a.SendInteractionRespond("➡ Playing sound", s, i)
+
+	vs, err := a.VoiceChannelCheck(s, i)
+	if err != nil {
+		return
+	}
+	if a.rejectIfGulagged(s, i) {
+		return
+	}
+
+	var req playRequest
+	switch data.Name {
+	case "play":
+		soundName := data.Options[0].StringValue()
+		// /play accepts free text (autocomplete is only a suggestion), so make
+		// sure the sound exists before its name is posted in the channel
+		if sound, err := a.model.GetSound(soundName); err != nil || sound.Name == "" {
+			_ = a.UpdateInteractionResponse("🎶  Sound not found: "+escapeMarkdown(soundName), s, i)
+			return
+		}
+		req = playRequest{soundName: soundName, display: soundName, countStats: true}
+
+	case "random":
+		category := ""
+		if len(data.Options) > 0 {
+			category = data.Options[0].StringValue()
+		}
+		sound, err := a.model.GetRandomSound(category)
+		if err != nil {
+			msg := "🎲  No sounds found"
+			if category != "" {
+				msg += " in category " + escapeMarkdown(category)
+			}
+			_ = a.UpdateInteractionResponse(msg, s, i)
+			return
+		}
+		req = playRequest{soundName: sound.Name, display: "🎲 " + sound.Name, countStats: true}
+		_ = a.UpdateInteractionResponse("🎲  Playing random sound: "+escapeMarkdown(sound.Name), s, i)
+	}
+
+	if err := a.announceAndPlay(s, i, vs.ChannelID, req); err != nil {
+		log.ErrorLog.Println("error playing sound:", err)
+		_ = a.UpdateInteractionResponse("➡ Could not play the sound", s, i)
+	}
 }
 
 // PlaySound plays a sound in the given voice channel of a guild.
@@ -137,8 +90,9 @@ func (a *API) PlaySound(s *discordgo.Session, guildID, channelID, soundName stri
 	g := model.Guild(guildID)
 
 	// Stop the current sound of THIS guild and register this one as the latest request.
-	stop, done := g.StartPlayback()
+	playback, done := g.StartPlayback()
 	defer done()
+	stop := playback.Stopped()
 
 	g.LockPlayer()
 	defer g.UnlockPlayer()
@@ -176,21 +130,34 @@ func (a *API) PlaySound(s *discordgo.Session, guildID, channelID, soundName stri
 	// Start speaking.
 	_ = vc.Speaking(true)
 
-	// Send the buffer data.
-	for _, buff := range buffer {
+	// Send the buffer data, then once more for every requested repeat.
+	// Closing `stop` (stop button / newer sound) aborts the sound AND all repeats.
+	for {
+		for _, buff := range buffer {
+			select {
+			case vc.OpusSend <- buff:
+			case <-stop:
+				_ = vc.Speaking(false)
+				return nil
+			case <-time.After(opusSendTimeout):
+				// Voice sender is dead, drop the connection so the next play rejoins cleanly.
+				log.ErrorLog.Printf("voice connection stalled while playing %s, disconnecting", soundName)
+				_ = vc.Speaking(false)
+				if err := vc.Disconnect(); err != nil {
+					log.ErrorLog.Println("error disconnecting stalled voice connection:", err)
+				}
+				return fmt.Errorf("voice connection stalled")
+			}
+		}
+		if !playback.TakeRepeat() {
+			break
+		}
+		// short gap between repetitions, still interruptible
 		select {
-		case vc.OpusSend <- buff:
 		case <-stop:
 			_ = vc.Speaking(false)
 			return nil
-		case <-time.After(opusSendTimeout):
-			// Voice sender is dead, drop the connection so the next play rejoins cleanly.
-			log.ErrorLog.Printf("voice connection stalled while playing %s, disconnecting", soundName)
-			_ = vc.Speaking(false)
-			if err := vc.Disconnect(); err != nil {
-				log.ErrorLog.Println("error disconnecting stalled voice connection:", err)
-			}
-			return fmt.Errorf("voice connection stalled")
+		case <-time.After(300 * time.Millisecond):
 		}
 	}
 
@@ -213,71 +180,15 @@ func (a *API) PlayAudio(s *discordgo.Session, i *discordgo.InteractionCreate) er
 		return err
 	}
 
-	// Check if the user is in a voice channel
 	vs, err := a.VoiceChannelCheck(s, i)
 	if err != nil {
-		log.ErrorLog.Println("error checking voice channel:", err)
 		return err
 	}
+	_ = a.UpdateInteractionResponse("🎶  Playing audio", s, i)
 
-	user := i.Member.User
-	err = a.model.AddUser(user)
-	if err != nil {
-		log.ErrorLog.Println("error adding user:", err)
-		return err
-	}
-
-	content := []discordgo.MessageComponent{}
-	row := discordgo.ActionsRow{}
-	row.Components = append(row.Components, discordgo.Button{
-		Label:    "Stop Sound",
-		Style:    discordgo.DangerButton,
-		CustomID: "stop_sound",
+	return a.announceAndPlay(s, i, vs.ChannelID, playRequest{
+		soundName: audioName, display: "audio", isTemp: true,
 	})
-	content = append(content, row)
-
-	msg := &discordgo.MessageSend{
-		Content:    "➡ Currently Playing by " + user.Mention() + ": audio",
-		Components: content,
-	}
-
-	// Send the message (+stop button)
-	st, err := a.SendMessageComplex(msg, s, i, false)
-	if err != nil {
-		log.ErrorLog.Println("error[sound3] sending message:", err)
-		return err
-	}
-
-	err = a.UpdateInteractionResponse("🎶  Playing audio", s, i)
-	if err != nil {
-		log.ErrorLog.Println("error[sound4] updating interaction response:", err)
-		return err
-	}
-
-	err = a.DeleteOldStopSoundButtons(s, st)
-	if err != nil {
-		log.ErrorLog.Println("error deleting stop sound buttons:", err)
-	}
-
-	log.InfoLog.Printf("Guild %s: user %s played audio", i.GuildID, model.DisplayName(user))
-	// Play the sound
-	err = a.PlaySound(s, i.GuildID, vs.ChannelID, audioName, true)
-	if err != nil {
-		log.ErrorLog.Println("error playing sound:", err)
-		return err
-	}
-
-	time.Sleep(250 * time.Millisecond)
-
-	st, err = s.ChannelMessage(st.ChannelID, st.ID)
-	if err == nil {
-		err = s.ChannelMessageDelete(st.ChannelID, st.ID)
-		if err != nil {
-			log.ErrorLog.Println("error deleting stop sound button after sound finished:", err)
-		}
-	}
-
-	return nil
 }
 
 // SyncDatabaseWithFileSystem synchronizes the database with the filesystem.

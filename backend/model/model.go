@@ -28,9 +28,9 @@ type GuildState struct {
 	ID   string
 	Name string
 
-	playMu      sync.Mutex    // serializes playback within this guild
-	stopMu      sync.Mutex    // guards currentStop
-	currentStop chan struct{} // closed to stop the active or pending sound
+	playMu  sync.Mutex // serializes playback within this guild
+	stopMu  sync.Mutex // guards current
+	current *Playback  // the active (or pending) playback, nil if silent
 
 	activityMu   sync.Mutex
 	lastActivity time.Time
@@ -104,42 +104,82 @@ func (g *GuildState) LastActivity() time.Time {
 	return g.lastActivity
 }
 
-// StartPlayback stops whatever is playing in this guild and registers a new
-// playback. The returned channel is closed when this playback should stop;
-// done must be called when the playback ends.
-func (g *GuildState) StartPlayback() (stop <-chan struct{}, done func()) {
-	ch := make(chan struct{})
-	g.stopMu.Lock()
-	if g.currentStop != nil {
-		close(g.currentStop)
+// Playback is one requested sound including its queued repeats.
+type Playback struct {
+	stop    chan struct{} // closed to abort the sound and all its repeats
+	mu      sync.Mutex
+	pending int // repeats still to play
+	used    int // repeats requested so far (for the limit)
+}
+
+// Stopped is closed when the playback should end (stop button or newer sound).
+func (p *Playback) Stopped() <-chan struct{} { return p.stop }
+
+// TakeRepeat consumes one queued repeat; false if none is left.
+func (p *Playback) TakeRepeat() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.pending == 0 {
+		return false
 	}
-	g.currentStop = ch
+	p.pending--
+	return true
+}
+
+// StartPlayback stops whatever is playing in this guild and registers a new
+// playback. done must be called when the playback ends.
+func (g *GuildState) StartPlayback() (p *Playback, done func()) {
+	p = &Playback{stop: make(chan struct{})}
+	g.stopMu.Lock()
+	if g.current != nil {
+		close(g.current.stop)
+	}
+	g.current = p
 	g.stopMu.Unlock()
 
-	return ch, func() {
+	return p, func() {
 		g.stopMu.Lock()
-		if g.currentStop == ch {
-			g.currentStop = nil
+		if g.current == p {
+			g.current = nil
 		}
 		g.stopMu.Unlock()
 	}
 }
 
-// StopPlayback signals the active sound of this guild to stop without blocking.
+// StopPlayback aborts the active sound of this guild AND all its queued repeats.
 func (g *GuildState) StopPlayback() {
 	g.stopMu.Lock()
 	defer g.stopMu.Unlock()
-	if g.currentStop != nil {
-		close(g.currentStop)
-		g.currentStop = nil
+	if g.current != nil {
+		close(g.current.stop)
+		g.current = nil
 	}
+}
+
+// AddRepeat queues one more repetition of the active sound, up to max per
+// playback. Returns how many repeats were requested in total so far.
+func (g *GuildState) AddRepeat(max int) (used int, ok bool) {
+	g.stopMu.Lock()
+	p := g.current
+	g.stopMu.Unlock()
+	if p == nil {
+		return 0, false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.used >= max {
+		return p.used, false
+	}
+	p.used++
+	p.pending++
+	return p.used, true
 }
 
 // Playing reports whether a sound is currently playing (or queued) in this guild.
 func (g *GuildState) Playing() bool {
 	g.stopMu.Lock()
 	defer g.stopMu.Unlock()
-	return g.currentStop != nil
+	return g.current != nil
 }
 
 // LockPlayer / UnlockPlayer ensure only one sound plays per guild at a time.

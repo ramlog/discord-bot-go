@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
-	"time"
 
 	log "github.com/cyb3rplis/discord-bot-go/logger"
 	"github.com/cyb3rplis/discord-bot-go/model"
@@ -51,8 +50,12 @@ func (a *API) InteractionHandler(s *discordgo.Session, i *discordgo.InteractionC
 		a.handlePlaySoundInteraction(s, i)
 	case strings.HasPrefix(customID, "list_sounds_"):
 		a.handleListSoundsInteraction(s, i)
-	case strings.HasPrefix(customID, "stop_sound"):
+	case customID == stopSoundID:
 		a.handleStopSoundInteraction(s, i)
+	case customID == repeatSoundID:
+		a.handleRepeatInteraction(s, i)
+	case customID == randomSoundID:
+		a.handleRandomSoundInteraction(s, i)
 	default:
 		log.ErrorLog.Println("unknown interaction:", customID)
 	}
@@ -72,86 +75,22 @@ func (a *API) handleStopSoundInteraction(s *discordgo.Session, i *discordgo.Inte
 }
 
 func (a *API) handlePlaySoundInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	// Extract the subfolder and sound name from the custom ID
-	customID := ""
-	if i.Interaction.Type != 3 {
-		log.ErrorLog.Println("Invalid interaction type")
-		return
-	}
-
-	customID = i.Interaction.MessageComponentData().CustomID
-
+	customID := i.MessageComponentData().CustomID
 	parts := strings.SplitN(strings.TrimPrefix(customID, "play_sound_"), "_", 2)
 	if len(parts) != 2 {
 		log.ErrorLog.Println("Invalid custom ID format")
 		return
 	}
-	//subfolder := parts[0]
 	soundName := parts[1]
 
-	interactionUser := i.Member.User
-
-	// Check if the user is in a voice channel
 	vs, err := a.VoiceChannelCheck(s, i)
 	if err != nil {
-		log.ErrorLog.Println("error checking voice channel:", err)
 		return
 	}
-
-	// add user and user statistics
-	err = a.model.AddUser(interactionUser)
-	if err != nil {
-		log.ErrorLog.Println("error adding user:", err)
-	}
-
-	err = a.model.AddUserStatistics(i.GuildID, interactionUser, soundName)
-	if err != nil {
-		log.ErrorLog.Println("error adding user statistics:", err)
-	}
-
-	content := []discordgo.MessageComponent{}
-	row := discordgo.ActionsRow{}
-	row.Components = append(row.Components, discordgo.Button{
-		Label:    "Stop Sound",
-		Style:    discordgo.DangerButton,
-		CustomID: "stop_sound",
-	})
-	content = append(content, row)
-
-	msg := &discordgo.MessageSend{
-		Content:    "➡ Currently Playing by " + interactionUser.Mention() + ": " + soundName,
-		Components: content,
-	}
-
-	// Send the message (+stop button)
-	st, err := a.SendMessageComplex(msg, s, i, false)
-	if err != nil {
-		log.ErrorLog.Println("error[int3] sending message:", err)
-		return
-	}
-
-	err = a.DeleteOldStopSoundButtons(s, st)
-	if err != nil {
-		log.ErrorLog.Println("error deleting all stop sound buttons:", err)
-	}
-
-	log.InfoLog.Printf("Guild %s: user %s played sound: %s", i.GuildID, model.DisplayName(interactionUser), soundName)
-	// Construct the sound file path
-	// soundFile := fmt.Sprintf("%s/%s/%s.dca", model.Bot.Config.SoundsDir, subfolder, soundName)
-
-	// Play the sound
-	err = a.PlaySound(s, i.GuildID, vs.ChannelID, soundName, false)
-	if err != nil {
+	if err := a.announceAndPlay(s, i, vs.ChannelID, playRequest{
+		soundName: soundName, display: soundName, countStats: true,
+	}); err != nil {
 		log.ErrorLog.Println("error playing sound:", err)
-	}
-
-	time.Sleep(250 * time.Millisecond)
-	st, err = s.ChannelMessage(st.ChannelID, st.ID)
-	if err == nil {
-		err = s.ChannelMessageDelete(st.ChannelID, st.ID)
-		if err != nil {
-			log.ErrorLog.Println("error deleting stop sound button after sound finished:", err)
-		}
 	}
 }
 

@@ -344,3 +344,37 @@ func (m *Model) GetCategories() ([]string, error) {
 	}
 	return categories, nil
 }
+
+// GetRandomSound picks a random sound, optionally only from one category.
+func (m *Model) GetRandomSound(category string) (SoundInfo, error) {
+	q := "SELECT s.name, c.name FROM sounds AS s JOIN categories AS c ON s.category_id = c.id"
+	var args []interface{}
+	if category != "" {
+		q += " WHERE c.name = ?"
+		args = append(args, category)
+	}
+	q += " ORDER BY RANDOM() LIMIT 1"
+
+	var sound SoundInfo
+	err := m.Db.QueryRow(q, args...).Scan(&sound.Name, &sound.Category)
+	return sound, err
+}
+
+// SearchCategories returns categories whose name contains the query (for autocomplete).
+func (m *Model) SearchCategories(query string) ([]string, error) {
+	rows, err := m.Db.Query("SELECT name FROM categories WHERE name LIKE ? ORDER BY name ASC LIMIT 25", "%"+query+"%")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var categories []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		categories = append(categories, name)
+	}
+	return categories, rows.Err()
+}
