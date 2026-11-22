@@ -51,6 +51,7 @@ func Init() {
 		// background jobs iterate over all known guilds, so they only start once
 		ctrl.CheckBotActivity(s, modelInstance)
 		ctrl.CheckNewSounds(s, modelInstance)
+		ctrl.PruneRateLimits()
 	})
 
 	// GuildCreate fires once per server at startup, whenever the bot joins a new
@@ -78,8 +79,13 @@ func Init() {
 			return
 		}
 		model.Guild(i.GuildID) // make sure state exists
+		// one central spam check for every command and button
+		if !viewInstance.AllowInteraction(s, i) {
+			return
+		}
 		for _, h := range handlers {
-			go h(s, i)
+			h := h
+			go view.Safe("interaction handler", func() { h(s, i) })
 		}
 	})
 

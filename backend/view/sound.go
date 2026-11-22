@@ -24,13 +24,6 @@ func (a *API) tempAudioName(guildID string) string {
 	return a.model.Config.AudioTemp + "_" + guildID
 }
 
-var userLastInteraction = make(map[string]time.Time)
-var userInteractionCount = make(map[string]int)
-var mu sync.Mutex
-
-const maxInteractions = 15             // Maximum allowed interactions before timeout
-const resetDuration = 15 * time.Second // Duration to reset the interaction count
-
 type Entry struct {
 	ID   int
 	Name string
@@ -67,6 +60,13 @@ func (a *API) PromptInteractionPlaySound(s *discordgo.Session, i *discordgo.Inte
 			}
 
 			soundName := i.ApplicationCommandData().Options[0].StringValue()
+
+			// /play accepts free text (autocomplete is only a suggestion), so make
+			// sure the sound exists before its name is posted in the channel
+			if sound, err := a.model.GetSound(soundName); err != nil || sound.Name == "" {
+				_ = a.UpdateInteractionResponse("🎶  Sound not found: "+escapeMarkdown(soundName), s, i)
+				return
+			}
 
 			// add user and per-guild statistics (previously only buttons were counted)
 			if err := a.model.AddUser(interactionUser); err != nil {
@@ -325,7 +325,7 @@ func (a *API) getOrCreateCategoryID(folder string, existingCategories map[string
 			return 0, err
 		}
 	}
-	return a.model.GetCategoryByID(folder), nil
+	return a.model.GetCategoryByID(folder)
 }
 
 // processSoundFile handles the conversion and addition of a sound file.

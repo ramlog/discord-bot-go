@@ -58,7 +58,9 @@ func InitDB() (*sql.DB, func() error, error) {
 	}
 
 	// Open the SQLite database
-	db, err := sql.Open("sqlite3", databaseFile)
+	// _busy_timeout: wait up to 5s for a lock instead of failing immediately with
+	// "database is locked" when several servers write statistics at the same time
+	db, err := sql.Open("sqlite3", databaseFile+"?_busy_timeout=5000")
 	if err != nil {
 		log.FatalLog.Fatal(err)
 	}

@@ -100,7 +100,7 @@ func LoadConfig() *Config {
 	})
 
 	fmt.Printf("+%s+\n", strings.Repeat("-", 40))
-	fmt.Printf("| %-15s | %-20s |\n", "TOKEN", configInstance.Token[0:10]+"...")
+	fmt.Printf("| %-15s | %-20s |\n", "TOKEN", "set (hidden)")
 	fmt.Printf("|%s|\n", strings.Repeat("-", 40))
 	fmt.Printf("| %-15s | %-20s |\n", "SOUNDS_DIR", configInstance.SoundsDir)
 	fmt.Printf("|%s|\n", strings.Repeat("-", 40))

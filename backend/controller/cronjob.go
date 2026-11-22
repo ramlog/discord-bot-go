@@ -8,6 +8,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 	log "github.com/cyb3rplis/discord-bot-go/logger"
 	"github.com/cyb3rplis/discord-bot-go/model"
+	"github.com/cyb3rplis/discord-bot-go/view"
 	"github.com/go-co-op/gocron"
 )
 
@@ -23,17 +24,32 @@ func (c *Controller) SyncCronjob(ctx context.Context) {
 	}
 }
 
+func init() {
+	// a panic inside a cron job must not take the whole bot down
+	gocron.SetPanicHandler(func(jobName string, recoverData interface{}) {
+		log.ErrorLog.Printf("Cron: recovered from panic in job %s: %v", jobName, recoverData)
+	})
+}
+
+// PruneRateLimits cleans up the spam protection maps every 10 minutes.
+func (c *Controller) PruneRateLimits() {
+	scheduler := gocron.NewScheduler(time.UTC)
+	_, _ = scheduler.Every(10 * time.Minute).Do(view.PruneRateLimits)
+	scheduler.StartAsync()
+}
+
 func (c *Controller) SyncSoundDirectories() {
 	interval := time.Minute * 1
 	s := gocron.NewScheduler(time.UTC)
 	s.Every(interval).Do(func() {
 		fsSounds, err := c.model.ScanDirectory()
 		if err != nil {
-			log.FatalLog.Printf("Cron: error scanning sound directory: %v", err)
+			log.ErrorLog.Printf("Cron: error scanning sound directory: %v", err)
+			return
 		}
 		err = c.view.SyncDatabaseWithFileSystem(fsSounds)
 		if err != nil {
-			log.FatalLog.Printf("Cron: error syncing database with filesystem: %v", err)
+			log.ErrorLog.Printf("Cron: error syncing database with filesystem: %v", err)
 		}
 		//log.InfoLog.Println("Cron: database synced with filesystem")
 	})

@@ -10,7 +10,27 @@ import (
 	log "github.com/cyb3rplis/discord-bot-go/logger"
 )
 
+// userMentionsOnly lets the bot ping users it mentions explicitly, but never
+// @everyone, @here or roles, even if such text ends up in a message.
+var userMentionsOnly = &discordgo.MessageAllowedMentions{
+	Parse: []discordgo.AllowedMentionType{discordgo.AllowedMentionTypeUsers},
+}
+
+// escapeMarkdown neutralises Discord markdown (links, bold, code, ...) in user text.
+func escapeMarkdown(text string) string {
+	return markdownEscaper.Replace(text)
+}
+
+var markdownEscaper = strings.NewReplacer(
+	`\`, `\\`, "*", `\*`, "_", `\_`, "~", `\~`, "`", "\\`",
+	"|", `\|`, ">", `\>`, "[", `\[`, "]", `\]`, "(", `\(`, ")", `\)`,
+	"@", "@\u200b", "#", `\#`,
+)
+
 func (a *API) SendMessageComplex(msg *discordgo.MessageSend, s *discordgo.Session, i *discordgo.InteractionCreate, delete bool) (*discordgo.Message, error) {
+	if msg.AllowedMentions == nil {
+		msg.AllowedMentions = userMentionsOnly
+	}
 	// send complex message
 	message, err := s.ChannelMessageSendComplex(i.ChannelID, msg)
 	if err != nil {
@@ -30,7 +50,10 @@ func (a *API) SendMessageComplex(msg *discordgo.MessageSend, s *discordgo.Sessio
 
 func (a *API) SendMessage(msg string, s *discordgo.Session, i *discordgo.InteractionCreate, delete bool) (*discordgo.Message, error) {
 	// send message
-	message, err := s.ChannelMessageSend(i.ChannelID, msg)
+	message, err := s.ChannelMessageSendComplex(i.ChannelID, &discordgo.MessageSend{
+		Content:         msg,
+		AllowedMentions: userMentionsOnly,
+	})
 	if err != nil {
 		log.ErrorLog.Println("error[msg2] sending message:", err)
 		return nil, err

@@ -148,7 +148,12 @@ func (a *API) PromptInteractionManage(s *discordgo.Session, i *discordgo.Interac
 
 					var categoryID int
 					existingCategories, _ := a.model.GetCategoriesM() // Get current folders/categories in DB
-					existingSounds := a.model.GetSoundsM()
+					existingSounds, err := a.model.GetSoundsM()
+					if err != nil {
+						log.ErrorLog.Println("error loading sounds:", err)
+						_ = a.UpdateInteractionResponse("🎶  Database error, try again", s, i)
+						return
+					}
 					// Check if the folder (category) exists in the database
 					if dbCategoryID, exists := existingCategories[download.Category]; exists {
 						categoryID = dbCategoryID // The folder already exists
@@ -161,7 +166,12 @@ func (a *API) PromptInteractionManage(s *discordgo.Session, i *discordgo.Interac
 							return
 						}
 						// Fetch the new category ID after insertion
-						categoryID = a.model.GetCategoryByID(download.Category)
+						categoryID, err = a.model.GetCategoryByID(download.Category)
+						if err != nil {
+							log.ErrorLog.Println(err)
+							_ = a.UpdateInteractionResponse("🎶  Database error, try again", s, i)
+							return
+						}
 					}
 
 					if model.FileExistsInDB(existingSounds, categoryID, download.SoundName, fileHash) {
@@ -247,7 +257,12 @@ func (a *API) PromptInteractionManage(s *discordgo.Session, i *discordgo.Interac
 							return
 						}
 						// Fetch the new category ID after insertion
-						categoryID = a.model.GetCategoryByID(category)
+						categoryID, err = a.model.GetCategoryByID(category)
+						if err != nil {
+							log.ErrorLog.Println(err)
+							_ = a.UpdateInteractionResponse("🎶  Database error, try again", s, i)
+							return
+						}
 					}
 
 					err = a.model.MoveSound(categoryID, soundName)
@@ -307,7 +322,12 @@ func (a *API) DownloadAudio(download Download) error {
 	}
 	log.InfoLog.Printf("Downloading %s to %s. START: %s, END: %s", download.URL, destFile, download.Start, download.End)
 
-	args := []string{"-x", "--audio-format", "mp3", "--force-overwrites", "-o", destFile}
+	args := []string{
+		"--ignore-config",        // never read yt-dlp config files from the container
+		"--no-playlist",          // a playlist URL must not download dozens of videos
+		"--max-filesize", "100M", // protect the disk
+		"-x", "--audio-format", "mp3", "--force-overwrites", "-o", destFile,
+	}
 	if !isEmptyTimestamp(download.Start) || !isEmptyTimestamp(download.End) {
 		start, end := "0", "inf"
 		if !isEmptyTimestamp(download.Start) {

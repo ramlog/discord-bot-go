@@ -223,18 +223,13 @@ func (m *Model) GetSoundsAll() ([]string, error) {
 }
 
 // GetCategoryByID returns the ID of a category by its name.
-func (m *Model) GetCategoryByID(folderName string) int {
+func (m *Model) GetCategoryByID(folderName string) (int, error) {
 	var categoryID int
 	err := m.Db.QueryRow("SELECT id FROM categories WHERE name = ?", folderName).Scan(&categoryID)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			// This should not happen because the category should exist by this point.
-			log.InfoLog.Printf("Category %s not found in database", folderName)
-		} else {
-			log.FatalLog.Fatal(err)
-		}
+		return 0, fmt.Errorf("looking up category %s: %w", folderName, err)
 	}
-	return categoryID
+	return categoryID, nil
 }
 
 // GetSound returns the sound and the category name by soundName (from DB)
@@ -252,10 +247,10 @@ func (m *Model) GetSound(soundName string) (SoundInfo, error) {
 }
 
 // GetSoundsM returns a map of sounds with their hashes (from DB)
-func (m *Model) GetSoundsM() map[int]map[string]string {
+func (m *Model) GetSoundsM() (map[int]map[string]string, error) {
 	rows, err := m.Db.Query("SELECT category_id, name, hash FROM sounds")
 	if err != nil {
-		log.FatalLog.Fatal(err)
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -264,14 +259,14 @@ func (m *Model) GetSoundsM() map[int]map[string]string {
 		var categoryID int
 		var fileName, fileHash string
 		if err := rows.Scan(&categoryID, &fileName, &fileHash); err != nil {
-			log.FatalLog.Fatal(err)
+			return nil, err
 		}
 		if sounds[categoryID] == nil {
 			sounds[categoryID] = make(map[string]string)
 		}
 		sounds[categoryID][fileName] = fileHash
 	}
-	return sounds
+	return sounds, rows.Err()
 }
 
 // AddCategory adds a category to the database.

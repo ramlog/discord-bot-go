@@ -38,38 +38,13 @@ func (a *API) InteractionHandler(s *discordgo.Session, i *discordgo.InteractionC
 	} else {
 		if user, ok := SetUserGulagRemaining(user); ok {
 			msg := fmt.Sprintf(user.User.Mention()+" you are in the Gulag for another %s", user.Remaining)
-			_, err = a.SendMessage(msg, s, i, false)
+			_, err = a.SendMessage(msg, s, i, true)
 			if err != nil {
 				log.ErrorLog.Printf("error[int1] sending message: %v", err)
 			}
 			return
 		}
 	}
-
-	// Check if the user is spamming the buttons and limit the interactions
-	mu.Lock()
-	lastInteraction, exists := userLastInteraction[user.User.ID] // Get the last interaction time
-	if exists && time.Since(lastInteraction) < resetDuration {   // Check if the user has interacted recently
-		userInteractionCount[user.User.ID]++
-	} else {
-		userInteractionCount[user.User.ID] = 1 // Reset the interaction count
-	}
-	userLastInteraction[user.User.ID] = time.Now()            // Update the last interaction time
-	if userInteractionCount[user.User.ID] > maxInteractions { // Check if the user has exceeded the interaction limit
-		mu.Unlock()
-		msg := "Stop spamming the buttons " + user.User.Mention() + ", you are now being sent to the Gulag for one minute."
-		_, err = a.SendMessage(msg, s, i, true)
-		if err != nil {
-			log.ErrorLog.Println("error[int2] sending message:", err)
-		}
-		err := a.model.GulagUser(user.User, 1)
-		if err != nil {
-			log.ErrorLog.Println("error gulagging user:", err)
-		}
-
-		return
-	}
-	mu.Unlock()
 
 	switch {
 	case strings.HasPrefix(customID, "play_sound_"):
