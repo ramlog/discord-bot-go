@@ -3,6 +3,11 @@
 All notable changes since forking [cyb3rplis/discord-bot-go](https://github.com/cyb3rplis/discord-bot-go) at commit `843136b`.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.3.0] - 2026-11-22
+
+### Added
+- `/help` lists all commands and buttons with short explanations. Only the requesting user sees it, and moderator/owner commands are only listed for mods and owners.
+
 ## [2.2.0] - 2026-11-22
 
 ### Added
@@ -67,6 +72,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `/manage create` gave no feedback when download or conversion failed.
 - Interactions from DMs no longer crash the bot.
 
+[2.3.0]: https://github.com/ramlog/discord-bot-go/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/ramlog/discord-bot-go/compare/v2.1.1...v2.2.0
 [2.1.1]: https://github.com/ramlog/discord-bot-go/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/ramlog/discord-bot-go/compare/v2.0.0...v2.1.0

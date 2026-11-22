@@ -47,6 +47,10 @@ A feature-rich [Discord](https://discord.com/) soundboard bot written in [Go](ht
 
 ## Commands
 
+### `/help`
+
+Show all commands and buttons. Only visible to you, and only lists what you are allowed to use (moderator and owner commands appear for mods/owners only).
+
 ### `/play`
 
 Play a sound directly by name.

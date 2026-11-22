@@ -25,6 +25,7 @@ func AllCommands() []*discordgo.ApplicationCommand {
 		commandStats(),
 		commandPlaySound(),
 		commandRandom(),
+		commandHelp(),
 		commandMisc(),
 	}
 	for _, c := range cmds {
@@ -372,5 +373,12 @@ func commandRandom() *discordgo.ApplicationCommand {
 				Autocomplete: true,
 			},
 		},
+	}
+}
+
+func commandHelp() *discordgo.ApplicationCommand {
+	return &discordgo.ApplicationCommand{
+		Name:        "help",
+		Description: "Show all commands and buttons you can use",
 	}
 }
