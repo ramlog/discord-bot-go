@@ -73,6 +73,7 @@ func Init() {
 		viewInstance.PromptInteractionStats,
 		viewInstance.PromptInteractionPlaySound,
 		viewInstance.PromptInteractionMisc,
+		viewInstance.PromptInteractionHelp,
 	}
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if i.GuildID == "" || i.Member == nil || i.Member.User == nil {
