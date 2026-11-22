@@ -3,6 +3,10 @@ on:
   push:
     branches:
       - main
+    # release: git tag v2.1.0 && git push origin v2.1.0
+    # (path filters are not evaluated for tag pushes, so tags always build)
+    tags:
+      - "v*"
     paths:
       - "backend/**"
       - "Dockerfile"
@@ -11,6 +15,7 @@ on:
 
 # Image goes to the GitHub Container Registry of whoever owns this repo:
 #   ghcr.io/<owner>/<repo>:latest   (newest build of main)
+#   ghcr.io/<owner>/<repo>:2.1.0    (release tag v2.1.0)
 #   ghcr.io/<owner>/<repo>:sha-xxxx (every build, for rollbacks)
 # No secrets needed: the workflow's built-in GITHUB_TOKEN may push packages.
 
@@ -30,6 +35,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0 # full history + tags, needed for git describe
+
+      - name: Determine version
+        id: version
+        run: |
+          # v2.0.0 on a tag, v2.0.0-3-gabc1234 after it, plain short SHA without any tag
+          echo "version=$(git describe --tags --always)" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -45,6 +58,7 @@ jobs:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
             type=sha,prefix=sha-
 
       - name: Build and push Docker image
@@ -55,3 +69,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+            COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ steps.version.outputs.date }}
+            REPO_URL=${{ github.server_url }}/${{ github.repository }}

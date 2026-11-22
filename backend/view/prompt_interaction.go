@@ -347,6 +347,11 @@ func commandMisc() *discordgo.ApplicationCommand {
 					Name:        "leave",
 					Description: "Leave the voice channel",
 				},
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "version",
+					Description: "Show which version of the bot is running",
+				},
 			},
 		},
 	}

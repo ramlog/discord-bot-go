@@ -140,6 +140,7 @@ Miscellaneous bot controls.
 | Subcommand | Description |
 |------------|-------------|
 | `leave` | Force the bot to leave the voice channel |
+| `version` | Show the running version, commit and build date |
 
 ## Button Interactions
 
@@ -239,6 +240,15 @@ Slash commands are registered on every server automatically when the bot starts 
 The database is migrated automatically on first start. Existing statistics have no server assigned, so set `LEGACY_GUILD_ID` to the ID of the server the bot was running on before. If old statistics exist and the variable is missing, the bot refuses to start and leaves the database untouched. Back up `data/soundbot.db` before upgrading.
 
 The variable `ADMIN_ROLE` is no longer used. The bot also no longer needs the privileged *Server Members* and *Presence* intents.
+
+## Versioning
+
+Every image built by GitHub Actions contains its version, visible via `/misc version` and in the container log on startup. The version comes from `git describe`:
+
+- `v2.0.0` — built exactly from the tag `v2.0.0`
+- `v2.0.0-3-gabc1234` — 3 commits after `v2.0.0`, at commit `abc1234`
+
+To publish a release: `git tag v2.1.0 && git push origin v2.1.0`. This also creates the image tag `ghcr.io/<owner>/discord-bot-go:2.1.0`, which you can pin in `compose.yml`.
 
 ## Updating
 

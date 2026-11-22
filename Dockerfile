@@ -8,7 +8,17 @@ ENV GOOS=linux
 ENV GOARCH=amd64
 WORKDIR /app/backend
 COPY backend/ ./
-RUN go build -o /dist/discord-bot-go main/main.go
+# Build information, passed in by the CI workflow (defaults for local builds)
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILD_DATE=unknown
+ARG REPO_URL=
+RUN go build \
+    -ldflags "-X github.com/cyb3rplis/discord-bot-go/version.Version=${VERSION} \
+              -X github.com/cyb3rplis/discord-bot-go/version.Commit=${COMMIT} \
+              -X github.com/cyb3rplis/discord-bot-go/version.BuildDate=${BUILD_DATE} \
+              -X github.com/cyb3rplis/discord-bot-go/version.RepoURL=${REPO_URL}" \
+    -o /dist/discord-bot-go main/main.go
 
 # Stage 2: Set up the runtime environment
 FROM debian:bookworm-slim AS discord-bot-go

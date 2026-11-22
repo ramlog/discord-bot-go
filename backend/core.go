@@ -12,10 +12,12 @@ import (
 	"github.com/cyb3rplis/discord-bot-go/db"
 	log "github.com/cyb3rplis/discord-bot-go/logger"
 	"github.com/cyb3rplis/discord-bot-go/model"
+	"github.com/cyb3rplis/discord-bot-go/version"
 	"github.com/cyb3rplis/discord-bot-go/view"
 )
 
 func Init() {
+	log.InfoLog.Printf("Starting discord-bot-go %s", version.String())
 	m, dbClose, err := db.InitModel()
 	if err != nil {
 		log.FatalLog.Fatalf("Failed to initialize database: %v", err)
